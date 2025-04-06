@@ -1,0 +1,152 @@
+- alias: "Sincronizar time_am_pm al segundo 00 al iniciar"
+  trigger:
+    - platform: homeassistant
+      event: start
+  mode: single
+  action:
+    - variables:
+        segundos_actuales: "{{ now().second }}"
+        segundos_para_00: "{{ 60 - segundos_actuales if segundos_actuales > 0 else 0 }}"
+    - delay:
+        seconds: "{{ segundos_para_00 }}"
+    - service: homeassistant.update_entity
+      data:
+        entity_id: sensor.time_am_pm
+
+- alias: "Actualizar sensor.time_am_pm cada segundo"
+  trigger:
+    - platform: time_pattern
+      seconds: "/1"
+  action:
+    - service: homeassistant.update_entity
+      entity_id: sensor.time_am_pm
+
+- alias: "Timbres con repeticiones - Botón (Timbre 9)"
+  trigger:
+    - platform: state
+      entity_id: input_boolean.timbre_9_button
+      to: "on"
+  action:
+    - variables:
+        repeticiones: "{{ states('input_number.numero_de_timbres_timbre9') | int }}"
+    - repeat:
+        count: "{{ repeticiones }}"
+        sequence:
+          - service: switch.turn_on
+            entity_id: switch.sonoff_10009987d9
+          - delay:
+              seconds: 1
+          - service: switch.turn_off
+            entity_id: switch.sonoff_10009987d9
+          - delay:
+              seconds: 0.5
+    - service: input_boolean.turn_off
+      entity_id: input_boolean.timbre_9_button
+
+- alias: "Timbres con repeticiones - Botón (Timbre 10 Toggle Inteligente)"
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: input_boolean.timbre_10_button
+  condition:
+    - condition: state
+      entity_id: input_boolean.timbre_10_button
+      state: "on"
+  action:
+    - variables:
+        repeticiones: "{{ states('input_number.numero_de_timbres_timbre10') | int }}"
+        ejecuciones: "{{ states('input_number.numero_ejecuciones_timbre10') | int }}"
+        espera: "{{ states('input_number.delay_entre_ejecuciones_timbre10') | int }}"
+    - repeat:
+        count: "{{ ejecuciones }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: input_boolean.timbre_10_button
+                    state: "off"
+                sequence:
+                  - stop: "Timbre de emergencia detenido por el usuario"
+          - repeat:
+              count: "{{ repeticiones }}"
+              sequence:
+                - choose:
+                    - conditions:
+                        - condition: state
+                          entity_id: input_boolean.timbre_10_button
+                          state: "off"
+                      sequence:
+                        - stop: "Timbre de emergencia detenido por el usuario"
+                - service: switch.turn_on
+                  entity_id: switch.sonoff_10009987d9
+                - delay:
+                    seconds: 2.5
+                - service: switch.turn_off
+                  entity_id: switch.sonoff_10009987d9
+                - delay:
+                    seconds: 0.5
+          - delay:
+              seconds: "{{ espera }}"
+
+- alias: "Timbres Programados (Timbres 1 a 8)"
+  trigger:
+    - platform: time
+      at: input_datetime.timbre_1
+    - platform: time
+      at: input_datetime.timbre_2
+    - platform: time
+      at: input_datetime.timbre_3
+    - platform: time
+      at: input_datetime.timbre_4
+    - platform: time
+      at: input_datetime.timbre_5
+    - platform: time
+      at: input_datetime.timbre_6
+    - platform: time
+      at: input_datetime.timbre_7
+    - platform: time
+      at: input_datetime.timbre_8
+  action:
+    - variables:
+        repeticiones: "{{ states('input_number.numero_de_timbres') | int }}"
+        duracion_pulso: "{{ states('number.sonoff_10009987d9_pulsewidth') | float }}"
+    - repeat:
+        count: "{{ repeticiones }}"
+        sequence:
+          - service: switch.turn_on
+            entity_id: switch.sonoff_10009987d9
+          - delay:
+              seconds: "{{ duracion_pulso }}"
+          - service: switch.turn_off
+            entity_id: switch.sonoff_10009987d9
+          - delay:
+              seconds: 0.5
+
+- alias: "Apagado Automático del Sistema"
+  trigger:
+    - platform: time
+      at: input_datetime.hora_apagado_auto
+  condition:
+    - condition: state
+      entity_id: input_boolean.activar_apagado_automatico
+      state: "on"
+  action:
+    - service: hassio.host_shutdown
+
+- alias: Verificar y corregir selección de horario inválido
+  id: verificar_input_select_horarios
+  description: >
+    Restaura la opción 'Selecciona un horario guardado' si el valor actual no está en la lista de opciones.
+  trigger:
+    - platform: homeassistant
+      event: start
+  condition:
+    - condition: template
+      value_template: >
+        {{ states('input_select.horarios_guardados') not in state_attr('input_select.horarios_guardados', 'options') }}
+  action:
+    - service: input_select.select_option
+      data:
+        entity_id: input_select.horarios_guardados
+        option: "Selecciona un horario guardado"
+

@@ -1,0 +1,98 @@
+guardar_horario_actual:
+  alias: "Guardar horario actual"
+  sequence:
+    - variables:
+        nombre_base: "{{ states('input_text.horario_nombre') | trim }}"
+        descripcion: "{{ states('input_text.horario_descripcion') | trim }}"
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ nombre_base == '' or descripcion == '' }}"
+          sequence:
+            - service: persistent_notification.create
+              data:
+                title: "Error al guardar"
+                message: "Debes ingresar un nombre y una descripción antes de guardar el horario."
+      default:
+        - variables:
+            json_actual: "{{ states('input_text.horarios_guardados_serializados') }}"
+            lista: >
+              {% set raw = json_actual | default('[]') %}
+              {% if raw is string and raw.strip().startswith('[') %}
+                {{ raw | from_json }}
+              {% else %}
+                []
+              {% endif %}
+            nombres_guardados: "{{ lista | map(attribute=0) | list }}"
+        - variables:
+            nombre_final: >
+              {% set ns = namespace(nombre=nombre_base) %}
+              {% for i in range(1, 100) %}
+                {% if ns.nombre not in nombres_guardados %}
+                  {% break %}
+                {% else %}
+                  {% set ns.nombre = nombre_base ~ '_copy_' ~ i %}
+                {% endif %}
+              {% endfor %}
+              {{ ns.nombre }}
+        - variables:
+            nueva_lista: "{{ lista + [[nombre_final, descripcion]] }}"
+            nuevas_opciones: "{{ nueva_lista | map('join', ' || ') | list }}"
+        - service: input_text.set_value
+          data:
+            entity_id: input_text.horarios_guardados_serializados
+            value: "{{ nueva_lista | to_json }}"
+        - service: input_select.set_options
+          data:
+            entity_id: input_select.horarios_guardados
+            options: >-
+              {{ ["Selecciona un horario guardado"] + nuevas_opciones }}
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: >
+                    {{ states('input_select.horarios_guardados') not in (["Selecciona un horario guardado"] + nuevas_opciones) }}
+              sequence:
+                - service: input_select.select_option
+                  data:
+                    entity_id: input_select.horarios_guardados
+                    option: "Selecciona un horario guardado"
+        - variables:
+            timbres_json: >-
+              {
+                "nombre": "{{ nombre_final }}",
+                "descripcion": "{{ descripcion }}",
+                "timbre_1": "{{ states('input_datetime.timbre_1') }}",
+                "timbre_2": "{{ states('input_datetime.timbre_2') }}",
+                "timbre_3": "{{ states('input_datetime.timbre_3') }}",
+                "timbre_4": "{{ states('input_datetime.timbre_4') }}",
+                "timbre_5": "{{ states('input_datetime.timbre_5') }}",
+                "timbre_6": "{{ states('input_datetime.timbre_6') }}",
+                "timbre_7": "{{ states('input_datetime.timbre_7') }}",
+                "timbre_8": "{{ states('input_datetime.timbre_8') }}"
+              }
+        - variables:
+            timbres_json_escaped: >-
+              {{ timbres_json | replace('"', '\\"') }}
+        - service: persistent_notification.create
+          data:
+            title: "DEBUG JSON"
+            message: "{{ timbres_json_escaped }}"
+        - service: shell_command.debug_guardar_timbres
+          data:
+            timbres_json_escaped: "{{ timbres_json_escaped }}"
+        - service: shell_command.guardar_timbres
+          data:
+            timbres_json_escaped: "{{ timbres_json_escaped }}"
+        - service: input_text.set_value
+          data:
+            entity_id: input_text.horario_nombre
+            value: ""
+        - service: input_text.set_value
+          data:
+            entity_id: input_text.horario_descripcion
+            value: ""
+        - service: persistent_notification.create
+          data:
+            title: "Horario guardado"
+            message: "El horario '{{ nombre_final }}' fue guardado exitosamente en la base de datos y en la lista visual."
